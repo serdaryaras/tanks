@@ -684,23 +684,40 @@ function buildReportHtml(logo, input, result) {
 </html>`;
 }
 
-function printReportHtml(html) {
-  const printWin = window.open("", "_blank", "noopener,noreferrer");
-  if (!printWin) {
-    throw new Error("Pop-up blocked. Allow pop-ups to save the PDF report.");
+function clearPrintFrame() {
+  document.getElementById("pdfPrintFrame")?.remove();
+}
+
+function ensurePrintFrame() {
+  clearPrintFrame();
+  const iframe = document.createElement("iframe");
+  iframe.id = "pdfPrintFrame";
+  iframe.title = "PDF report";
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText =
+    "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(iframe);
+  return iframe;
+}
+
+function printReportHtml(iframe, html) {
+  const frame = iframe?.contentWindow ? iframe : ensurePrintFrame();
+  const win = frame.contentWindow;
+  const doc = frame.contentDocument;
+  if (!win || !doc) {
+    throw new Error("Could not prepare the PDF report frame.");
   }
-  printWin.document.open();
-  printWin.document.write(html);
-  printWin.document.close();
-  const triggerPrint = () => {
-    printWin.focus();
-    printWin.print();
-  };
-  if (printWin.document.readyState === "complete") {
-    setTimeout(triggerPrint, 250);
-  } else {
-    printWin.onload = () => setTimeout(triggerPrint, 250);
-  }
+
+  win.addEventListener("afterprint", clearPrintFrame, { once: true });
+  doc.open();
+  doc.write(html);
+  doc.close();
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      win.focus();
+      win.print();
+    }, 250);
+  });
 }
 
 async function exportPdf() {
@@ -710,15 +727,17 @@ async function exportPdf() {
   state.lastResult = result;
   const btn = $("btnPdf");
   btn.disabled = true;
+  const frame = window.artiApp?.savePdf ? null : ensurePrintFrame();
   try {
     const logo = await logoDataUrl();
     const html = buildReportHtml(logo, input, result);
     if (window.artiApp?.savePdf) {
       await window.artiApp.savePdf(html);
     } else {
-      printReportHtml(html);
+      printReportHtml(frame, html);
     }
   } catch (err) {
+    clearPrintFrame();
     $("errorBox").classList.remove("hidden");
     $("errorBox").textContent = `PDF export failed: ${err.message || err}`;
   } finally {
