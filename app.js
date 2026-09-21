@@ -1,1249 +1,788 @@
-const rowsContainer = document.getElementById("rowsContainer");
-const rowTemplate = document.getElementById("rowTemplate");
-const addRowBtn = document.getElementById("addRowBtn");
-const calculateBtn = document.getElementById("calculateBtn");
-const errorsBox = document.getElementById("errors");
-const totalResults = document.getElementById("totalResults");
-const fuelResults = document.getElementById("fuelResults");
-const tankResults = document.getElementById("tankResults");
-const utilityTankResults = document.getElementById("utilityTankResults");
-const sludgeResults = document.getElementById("sludgeResults");
-const bilgeDrainResults = document.getElementById("bilgeDrainResults");
-const exportXlsxBtn = document.getElementById("exportXlsxBtn");
-const exportPdfBtn = document.getElementById("exportPdfBtn");
-const importXlsxInput = document.getElementById("importXlsxInput");
-const fileStatus = document.getElementById("fileStatus");
-const sludgeConstructionBasisEl = document.getElementById(
-  "sludgeConstructionBasis"
-);
-const sludgeMethodEl = document.getElementById("sludgeMethod");
-const sludgeItem3BaseEl = document.getElementById("sludgeItem3Base");
-const sludgeItem3BaseGroup = document.getElementById("sludgeItem3BaseGroup");
-const sludgeFuelModeGroup = document.getElementById("sludgeFuelModeGroup");
-const sludgeFuelModeLabel = document.getElementById("sludgeFuelModeLabel");
-const sludgeFuelModeEl = document.getElementById("sludgeFuelMode");
-const grtRangeGroup = document.getElementById("grtRangeGroup");
-const sludgeBallastApplyGroup = document.getElementById("sludgeBallastApplyGroup");
-const sludgeBallastCapacityGroup = document.getElementById(
-  "sludgeBallastCapacityGroup"
-);
-const sludgeBallastFuelTypeGroup = document.getElementById(
-  "sludgeBallastFuelTypeGroup"
-);
-const REPORT_LOGO_PATH = "assets/arti_engineering_logo.png";
-const SLUDGE_METHOD_OPTIONS = [
-  {
-    value: "item1",
-    label: "Reg.12.1 .1 - Ships not carrying ballast water in fuel oil tanks",
-  },
-  {
-    value: "item2",
-    label:
-      "Reg.12.1 .2 - Ships with homogenizer/incinerator or other recognized sludge control means",
-  },
-  {
-    value: "item3",
-    label: "Reg.12.1 .3 - Ships carrying ballast water in fuel oil tanks",
-  },
-  {
-    value: "item4",
-    label:
-      "Reg.12.1 .4 - Ships not carrying ballast water in fuel oil tanks (C in m³/day)",
-  },
-  {
-    value: "item5",
-    label:
-      "Reg.12.1 .5 - Contract/keel before 1 July 2010 with recognized sludge control means",
-  },
-];
-const BV_GREY_COMPONENTS_LPD = {
-  cruise: { greyExcl: 160, laundry: 80, galley: 90 },
-  ro_ro_night: { greyExcl: 150, laundry: 20, galley: 30 },
-  ro_ro_day: { greyExcl: 50, laundry: 20, galley: 30 },
-  cargo: { greyExcl: 100, laundry: 40, galley: 60 },
-};
-const BV_BLACK_LPD = {
-  conventional: 100,
-  vacuum: 12,
+const $ = (id) => document.getElementById(id);
+
+const state = {
+  shipType: 4,
+  lastInput: null,
+  lastResult: null,
+  mainEngines: [
+    { id: crypto.randomUUID(), label: "Main engine 1", powerKw: 6000, sfocGPerKwh: 185, fuel: "heavy_fuel_oil" },
+  ],
+  auxiliaryEngines: [
+    { id: crypto.randomUUID(), label: "Auxiliary engine 1", powerKw: 800, sfocGPerKwh: 210, fuel: "diesel_gas_oil" },
+    { id: crypto.randomUUID(), label: "Auxiliary engine 2", powerKw: 600, sfocGPerKwh: 210, fuel: "diesel_gas_oil" },
+  ],
+  boilers: [
+    { id: crypto.randomUUID(), label: "Boiler 1", consumptionKgPerH: 350, fuel: "heavy_fuel_oil" },
+  ],
 };
 
-function addRow() {
-  const clone = rowTemplate.content.cloneNode(true);
-  rowsContainer.appendChild(clone);
+function selectedShipType() {
+  const active = document.querySelector(".type-card.is-active");
+  return Number(active?.dataset.type || state.shipType || 4);
 }
 
-function setFileStatus(message, isError = false) {
-  fileStatus.textContent = message;
-  fileStatus.style.color = isError ? "#fecaca" : "";
-}
-
-async function saveBlobWithPicker(blob, suggestedName, acceptType, fallbackName) {
-  if (window.showSaveFilePicker) {
-    const handle = await window.showSaveFilePicker({
-      suggestedName,
-      types: [
-        {
-          description: acceptType.description,
-          accept: acceptType.accept,
-        },
-      ],
-    });
-    const writable = await handle.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    return true;
-  }
-
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fallbackName || suggestedName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  return false;
-}
-
-function clearResults() {
-  totalResults.innerHTML = "";
-  fuelResults.innerHTML = "";
-  tankResults.innerHTML = "";
-  utilityTankResults.innerHTML = "";
-  sludgeResults.innerHTML = "";
-  bilgeDrainResults.innerHTML = "";
-}
-
-function toggleItem3BaseVisibility() {
-  if (!sludgeItem3BaseGroup) {
-    return;
-  }
-  sludgeItem3BaseGroup.style.display =
-    sludgeMethodEl.value === "item3" ? "grid" : "none";
-}
-
-function toggleGRTVisibility() {
-  if (!grtRangeGroup) {
-    return;
-  }
-  const method = sludgeMethodEl.value;
-  const needsGRT =
-    method === "item2" ||
-    method === "item5" ||
-    (method === "item3" && sludgeItem3BaseEl.value === "item2");
-  grtRangeGroup.style.display = needsGRT ? "grid" : "none";
-}
-
-function toggleBallastVisibility() {
-  const isItem3 = sludgeMethodEl.value === "item3";
-  const display = isItem3 ? "grid" : "none";
-  sludgeBallastApplyGroup.style.display = display;
-  sludgeBallastCapacityGroup.style.display = display;
-  sludgeBallastFuelTypeGroup.style.display = display;
-}
-
-function refreshK1InputState() {
-  const method = sludgeMethodEl.value;
-  const item3Base = sludgeItem3BaseEl.value;
-
-  // Methods that use K1:
-  // .1 => K1 0.01 / 0.005
-  // .4/.5 => K1 0.015 / 0.005
-  // .3 only when base is .1
-  const usesK1 =
-    method === "item1" ||
-    method === "item4" ||
-    method === "item5" ||
-    (method === "item3" && item3Base === "item1");
-
-  sludgeFuelModeGroup.style.display = usesK1 ? "grid" : "none";
-  if (!usesK1) {
-    return;
-  }
-
-  const isItem4Family = method === "item4" || method === "item5";
-  sludgeFuelModeLabel.textContent = isItem4Family
-    ? "Fuel Mode for K1 (0.015 / 0.005)"
-    : "Fuel Mode for K1 (0.01 / 0.005)";
-
-  // Rebuild options so the visible K1 values always match selected method.
-  sludgeFuelModeEl.innerHTML = "";
-  const optionA = document.createElement("option");
-  optionA.value = "hfo_purified";
-  optionA.textContent = isItem4Family
-    ? "Heavy fuel oil purified for main engine use (K1 = 0.015)"
-    : "Heavy fuel oil purified for main engine use (K1 = 0.01)";
-
-  const optionB = document.createElement("option");
-  optionB.value = "diesel_or_no_purification";
-  optionB.textContent =
-    "Diesel oil / heavy fuel oil without purification (K1 = 0.005)";
-
-  sludgeFuelModeEl.appendChild(optionA);
-  sludgeFuelModeEl.appendChild(optionB);
-}
-
-function refreshSludgeMethodOptions() {
-  const basis = sludgeConstructionBasisEl.value;
-  const allowedMethods =
-    basis === "post_1990"
-      ? ["item4", "item5"]
-      : ["item1", "item2", "item3"];
-  const currentValue = sludgeMethodEl.value;
-
-  sludgeMethodEl.innerHTML = "";
-  SLUDGE_METHOD_OPTIONS.filter((opt) => allowedMethods.includes(opt.value)).forEach(
-    (opt) => {
-      const optionEl = document.createElement("option");
-      optionEl.value = opt.value;
-      optionEl.textContent = opt.label;
-      sludgeMethodEl.appendChild(optionEl);
-    }
-  );
-
-  if (allowedMethods.includes(currentValue)) {
-    sludgeMethodEl.value = currentValue;
-  } else {
-    sludgeMethodEl.value = allowedMethods[0];
-  }
-
-  toggleItem3BaseVisibility();
-  toggleGRTVisibility();
-  toggleBallastVisibility();
-  refreshK1InputState();
-}
-
-function formatTons(kg) {
-  return (kg / 1000).toFixed(3);
-}
-
-function formatMass(kg) {
-  if (kg > 1500) {
-    return `${(kg / 1000).toFixed(1)} t`;
-  }
-
-  return `${kg >= 500 ? kg.toFixed(1) : kg.toFixed(2)} kg`;
-}
-
-function formatM3(m3) {
-  // 500 liters = 0.5 m3
-  return `${m3 >= 0.5 ? m3.toFixed(1) : m3.toFixed(3)} m³`;
-}
-
-function getVoyageHours() {
-  const duration = Number(document.getElementById("voyageDuration").value);
-  const unit = document.getElementById("voyageUnit").value;
-
-  if (Number.isNaN(duration) || duration <= 0) {
-    return {
-      error:
-        "Voyage duration must be a positive number. Example: 240 hours or 10 days.",
-    };
-  }
-
-  return { value: unit === "days" ? duration * 24 : duration };
-}
-
-function getTankSettings() {
-  const storageReservePct = Number(
-    document.getElementById("storageReservePct").value
-  );
-  const serviceHours = Number(document.getElementById("serviceHours").value);
-  const settingErrors = [];
-
-  if (!Number.isFinite(storageReservePct) || storageReservePct < 0) {
-    settingErrors.push("Storage tank reserve (%) must be 0 or greater.");
-  }
-
-  if (!Number.isFinite(serviceHours) || serviceHours < 0) {
-    settingErrors.push("Service tank autonomy (hours) must be 0 or greater.");
-  }
-
+function collectInput() {
+  state.shipType = selectedShipType();
   return {
-    values: { storageReservePct, serviceHours },
-    settingErrors,
-  };
-}
-
-function getUtilityTankSettings(voyageHours) {
-  const personsOnBoard = Number(document.getElementById("personsOnBoard").value);
-  const shipCategory = document.getElementById("shipCategory").value;
-  const blackWaterSystem = document.getElementById("blackWaterSystem").value;
-  const nonDischargeDays = Number(document.getElementById("nonDischargeDays").value);
-  const wasteTankTolerancePct = Number(
-    document.getElementById("wasteTankTolerancePct").value
-  );
-  const fwTankTolerancePct = Number(
-    document.getElementById("fwTankTolerancePct").value
-  );
-  const utilityErrors = [];
-
-  if (!Number.isFinite(personsOnBoard) || personsOnBoard < 0) {
-    utilityErrors.push("Persons on board (POB) must be 0 or greater.");
-  }
-  if (!BV_GREY_COMPONENTS_LPD[shipCategory]) {
-    utilityErrors.push("Selected ship category is not valid.");
-  }
-  if (!BV_BLACK_LPD[blackWaterSystem]) {
-    utilityErrors.push("Selected black water system is not valid.");
-  }
-
-  if (!Number.isFinite(nonDischargeDays) || nonDischargeDays < 7) {
-    utilityErrors.push("No-discharge period (days) must be 7 or greater.");
-  }
-
-  if (!Number.isFinite(wasteTankTolerancePct) || wasteTankTolerancePct < 0) {
-    utilityErrors.push("Grey/Black tank tolerance (%) must be 0 or greater.");
-  }
-
-  if (!Number.isFinite(fwTankTolerancePct) || fwTankTolerancePct < 0) {
-    utilityErrors.push("FW tank tolerance (%) must be 0 or greater.");
-  }
-
-  const voyageDays = voyageHours / 24;
-  const selectedGreyRates = BV_GREY_COMPONENTS_LPD[shipCategory] || {
-    greyExcl: 0,
-    laundry: 0,
-    galley: 0,
-  };
-  const totalGreyRateLpd =
-    selectedGreyRates.greyExcl +
-    selectedGreyRates.laundry +
-    selectedGreyRates.galley;
-  const blackRateLpd = BV_BLACK_LPD[blackWaterSystem] || 0;
-  const greyWaterDailyM3 = (personsOnBoard * totalGreyRateLpd) / 1000;
-  const blackWaterDailyM3 = (personsOnBoard * blackRateLpd) / 1000;
-
-  return {
-    values: {
-      personsOnBoard,
-      shipCategory,
-      blackWaterSystem,
-      greyExclRateLpd: selectedGreyRates.greyExcl,
-      laundryRateLpd: selectedGreyRates.laundry,
-      galleyRateLpd: selectedGreyRates.galley,
-      totalGreyRateLpd,
-      blackRateLpd,
-      greyWaterDailyM3,
-      blackWaterDailyM3,
-      nonDischargeDays,
-      wasteTankTolerancePct,
-      fwTankTolerancePct,
-      voyageDays,
+    shipName: $("shipName").value,
+    ship: {
+      vsKn: $("vsKn").value,
+      rangeNm: $("rangeNm").value,
+      enduranceDays: $("enduranceDays").value,
+      nonDischargePeriodDays: $("nonDischargeDays").value,
+      personsOnBoard: $("personsOnBoard").value,
+      shipType: state.shipType,
+      vacuumToilet: $("vacuumToilet").checked,
+      withCompactor: $("withCompactor").checked,
+      solidWasteIncinerator: $("solidWasteIncinerator").checked,
+      sludgeK1Mode: $("sludgeK1Mode").value,
     },
-    utilityErrors,
+    mainEngines: state.mainEngines.map((row) => ({ ...row })),
+    auxiliaryEngines: state.auxiliaryEngines.map((row) => ({ ...row })),
+    boilers: state.boilers.map((row) => ({ ...row })),
   };
 }
 
-function getSludgeSettings() {
-  const sludgeConstructionBasis = document.getElementById(
-    "sludgeConstructionBasis"
-  ).value;
-  const sludgeMethod = document.getElementById("sludgeMethod").value;
-  const sludgeItem3Base = document.getElementById("sludgeItem3Base").value;
-  const sludgeFuelMode = document.getElementById("sludgeFuelMode").value;
-  const sludgeDays = Number(document.getElementById("sludgeDays").value);
-  const grtRange = document.getElementById("grtRange").value;
-  const sludgeUseBallastAddition =
-    document.getElementById("sludgeUseBallastAddition").value === "yes";
-  const ballastCapacityTonnes = Number(
-    document.getElementById("ballastCapacityTonnes").value
-  );
-  const ballastFuelType = document.getElementById("ballastFuelType").value;
-  const sludgeErrors = [];
-
-  if (!["post_1990", "pre_1990"].includes(sludgeConstructionBasis)) {
-    sludgeErrors.push("Invalid construction basis selection.");
-  }
-  if (!["item1", "item2", "item3", "item4", "item5"].includes(sludgeMethod)) {
-    sludgeErrors.push("Invalid sludge regulation method.");
-  }
-  if (!["item1", "item2"].includes(sludgeItem3Base)) {
-    sludgeErrors.push("Invalid base V1 method for item .3.");
-  }
-  if (!["lt400", "400to3999", "gte4000"].includes(grtRange)) {
-    sludgeErrors.push("Invalid GRT range selection.");
-  }
-  if (!["hfo_purified", "diesel_or_no_purification"].includes(sludgeFuelMode)) {
-    sludgeErrors.push("Invalid sludge fuel mode.");
-  }
-  if (!Number.isFinite(sludgeDays) || sludgeDays <= 0) {
-    sludgeErrors.push("Sludge no-discharge period D (days) must be greater than 0.");
-  }
-  if (sludgeMethod === "item3" && sludgeUseBallastAddition &&
-    (!Number.isFinite(ballastCapacityTonnes) || ballastCapacityTonnes < 0)) {
-    sludgeErrors.push("Ballast capacity B (tonnes) must be 0 or greater.");
-  }
-  if (!["heavy", "diesel"].includes(ballastFuelType)) {
-    sludgeErrors.push("Invalid ballast fuel type.");
-  }
-
-  return {
-    values: {
-      sludgeConstructionBasis,
-      sludgeMethod,
-      sludgeItem3Base,
-      sludgeFuelMode,
-      sludgeDays,
-      grtRange,
-      sludgeUseBallastAddition,
-      ballastCapacityTonnes,
-      ballastFuelType,
-    },
-    sludgeErrors,
-  };
-}
-
-function getBilgeDrainSettings(parsedRows) {
-  const mainEngineKw = parsedRows
-    .filter((row) => row.equipType === "Main Engine")
-    .reduce((sum, row) => sum + row.quantity * row.powerKw, 0);
-  const holdDays = Number(document.getElementById("bilgeDrainDays").value);
-  const bilgeDrainErrors = [];
-
-  if (!Number.isFinite(mainEngineKw) || mainEngineKw <= 0) {
-    bilgeDrainErrors.push(
-      "At least one valid Main Engine row is required to derive rating P (kW)."
-    );
-  }
-  if (!Number.isFinite(holdDays) || holdDays <= 0) {
-    bilgeDrainErrors.push("Holding period D (days) must be greater than 0.");
-  }
-
-  return {
-    values: {
-      mainEngineKw,
-      holdDays,
-    },
-    bilgeDrainErrors,
-  };
-}
-
-function parseRows() {
-  const rows = [...rowsContainer.querySelectorAll("tr")];
-  const parsedRows = [];
-  const rowErrors = [];
-
-  rows.forEach((row, index) => {
-    const equipType = row.querySelector(".equipType").value.trim();
-    const fuelType = row.querySelector(".fuelType").value.trim().toUpperCase();
-    const quantity = Number(row.querySelector(".quantity").value);
-    const powerKw = Number(row.querySelector(".powerKw").value);
-    const loadPct = Number(row.querySelector(".loadPct").value);
-    const sfoc = Number(row.querySelector(".sfoc").value);
-    const density = Number(row.querySelector(".density").value);
-
-    if (!fuelType) {
-      rowErrors.push(
-        `Row ${index + 1}: Fuel type is required (e.g., HFO, MGO, LSMGO).`
-      );
-    }
-
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      rowErrors.push(`Row ${index + 1}: Quantity must be greater than 0.`);
-    }
-
-    if (!Number.isFinite(powerKw) || powerKw < 0) {
-      rowErrors.push(
-        `Row ${index + 1}: Power (kW) must be 0 or greater.`
-      );
-    }
-
-    if (!Number.isFinite(loadPct) || loadPct < 0 || loadPct > 100) {
-      rowErrors.push(
-        `Row ${index + 1}: Load (%) must be between 0 and 100.`
-      );
-    }
-
-    if (!Number.isFinite(sfoc) || sfoc < 0) {
-      rowErrors.push(`Row ${index + 1}: SFOC (g/kWh) must be 0 or greater.`);
-    }
-
-    if (!Number.isFinite(density) || density <= 0) {
-      rowErrors.push(
-        `Row ${index + 1}: Density (kg/m³) must be greater than 0.`
-      );
-    }
-
-    parsedRows.push({
-      equipType,
-      fuelType,
-      quantity,
-      powerKw,
-      loadPct,
-      sfoc,
-      density,
-    });
+function fmt(n, digits = 1) {
+  if (n == null || Number.isNaN(n)) return "—";
+  return Number(n).toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
   });
-
-  if (parsedRows.length === 0) {
-    rowErrors.push("At least one equipment row is required.");
-  }
-
-  return { parsedRows, rowErrors };
 }
 
-function getSimpleValue(id) {
-  return document.getElementById(id).value;
+function fmtDays(n) {
+  if (n == null || Number.isNaN(n)) return "—";
+  const digits = Math.abs(n - Math.round(n)) < 1e-9 ? 0 : 1;
+  return `${fmt(n, digits)} days`;
 }
 
-function setSimpleValue(id, value) {
-  if (value === undefined || value === null) {
-    return;
-  }
-  document.getElementById(id).value = String(value);
+function periodSourceLabel(period) {
+  if (!period?.source) return "";
+  return TankCapacities.PERIOD_SOURCE_LABELS[period.source] || period.source;
 }
 
-function collectInputState() {
-  const { parsedRows } = parseRows();
-  return {
-    metadata: [{ key: "schemaVersion", value: "1" }],
-    settings: [
-      { key: "voyageDuration", value: getSimpleValue("voyageDuration") },
-      { key: "voyageUnit", value: getSimpleValue("voyageUnit") },
-      { key: "storageReservePct", value: getSimpleValue("storageReservePct") },
-      { key: "serviceHours", value: getSimpleValue("serviceHours") },
-      { key: "personsOnBoard", value: getSimpleValue("personsOnBoard") },
-      { key: "shipCategory", value: getSimpleValue("shipCategory") },
-      { key: "blackWaterSystem", value: getSimpleValue("blackWaterSystem") },
-      { key: "nonDischargeDays", value: getSimpleValue("nonDischargeDays") },
-      { key: "wasteTankTolerancePct", value: getSimpleValue("wasteTankTolerancePct") },
-      { key: "fwTankTolerancePct", value: getSimpleValue("fwTankTolerancePct") },
-      { key: "sludgeMethod", value: getSimpleValue("sludgeMethod") },
-      {
-        key: "sludgeConstructionBasis",
-        value: getSimpleValue("sludgeConstructionBasis"),
-      },
-      { key: "sludgeItem3Base", value: getSimpleValue("sludgeItem3Base") },
-      { key: "sludgeFuelMode", value: getSimpleValue("sludgeFuelMode") },
-      { key: "sludgeDays", value: getSimpleValue("sludgeDays") },
-      { key: "grtRange", value: getSimpleValue("grtRange") },
-      { key: "sludgeUseBallastAddition", value: getSimpleValue("sludgeUseBallastAddition") },
-      { key: "ballastCapacityTonnes", value: getSimpleValue("ballastCapacityTonnes") },
-      { key: "ballastFuelType", value: getSimpleValue("ballastFuelType") },
-      { key: "bilgeDrainDays", value: getSimpleValue("bilgeDrainDays") },
-    ],
-    machineryRows: parsedRows.map((row) => ({
-      equipmentType: row.equipType,
-      fuelType: row.fuelType,
-      quantity: row.quantity,
-      powerKw: row.powerKw,
-      loadPct: row.loadPct,
-      sfoc: row.sfoc,
-      density: row.density,
-    })),
+function fmtPeriod(period) {
+  if (!period || !(period.days > 0)) return "—";
+  const src = periodSourceLabel(period);
+  return src ? `${fmtDays(period.days)} · ${src}` : fmtDays(period.days);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function escapeAttr(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;");
+}
+
+function fact(label, value, cls = "") {
+  return `<div><dt>${label}</dt><dd class="${cls}">${value}</dd></div>`;
+}
+
+function shipTypeLabel(type) {
+  return TankCapacities.WASTEWATER_SHIP_TYPES.find((t) => t.value === Number(type))?.label || "—";
+}
+
+function fuelOptions(selected) {
+  const short = {
+    diesel_gas_oil: "MGO/MDO",
+    light_fuel_oil: "LFO",
+    heavy_fuel_oil: "HFO",
+    lpg_propane: "LPG-P",
+    lpg_butane: "LPG-B",
+    lng: "LNG",
+    methanol: "MeOH",
+    ethanol: "EtOH",
   };
+  return TankCapacities.FUEL_TYPES.map(
+    (f) =>
+      `<option value="${f}" ${f === selected ? "selected" : ""}>${escapeHtml(short[f] || TankCapacities.FUEL_LABELS[f])}</option>`,
+  ).join("");
 }
 
-async function exportInputsToXlsx() {
-  if (typeof XLSX === "undefined") {
-    setFileStatus("XLSX library is not loaded.", true);
-    return;
-  }
-
-  const state = collectInputState();
-  const workbook = XLSX.utils.book_new();
-
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(state.metadata),
-    "Metadata"
-  );
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(state.settings),
-    "Settings"
-  );
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(state.machineryRows),
-    "MachineryRows"
-  );
-
-  const now = new Date();
-  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(
-    now.getDate()
-  ).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(
-    now.getMinutes()
-  ).padStart(2, "0")}`;
-  const filename = `vessel_inputs_${stamp}.xlsx`;
-
-  try {
-    const xlsxArray = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const blob = new Blob([xlsxArray], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-    const savedWithPicker = await saveBlobWithPicker(
-      blob,
-      filename,
-      {
-        description: "Excel Workbook",
-        accept: {
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
-        },
-      },
-      filename
-    );
-    setFileStatus(
-      savedWithPicker
-        ? "Inputs saved as XLSX."
-        : "Inputs downloaded as XLSX (save picker not supported in this browser)."
-    );
-  } catch (error) {
-    if (error.name === "AbortError") {
-      setFileStatus("Save canceled.");
-      return;
-    }
-    setFileStatus(`XLSX save failed: ${error.message}`, true);
-  }
-}
-
-function readSheet(workbook, name) {
-  const sheet = workbook.Sheets[name];
-  if (!sheet) {
-    return [];
-  }
-  return XLSX.utils.sheet_to_json(sheet, { defval: "" });
-}
-
-function importInputsFromXlsx(file) {
-  if (!file) {
-    return;
-  }
-  if (typeof XLSX === "undefined") {
-    setFileStatus("XLSX library is not loaded.", true);
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    try {
-      const data = new Uint8Array(event.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-      const settingsRows = readSheet(workbook, "Settings");
-      const machineryRows = readSheet(workbook, "MachineryRows");
-
-      const settings = {};
-      settingsRows.forEach((row) => {
-        if (row.key) {
-          settings[row.key] = row.value;
-        }
-      });
-
-      setSimpleValue("voyageDuration", settings.voyageDuration);
-      setSimpleValue("voyageUnit", settings.voyageUnit);
-      setSimpleValue("storageReservePct", settings.storageReservePct);
-      setSimpleValue("serviceHours", settings.serviceHours);
-      setSimpleValue("personsOnBoard", settings.personsOnBoard);
-      setSimpleValue("shipCategory", settings.shipCategory);
-      setSimpleValue("blackWaterSystem", settings.blackWaterSystem);
-      setSimpleValue("nonDischargeDays", settings.nonDischargeDays);
-      setSimpleValue("wasteTankTolerancePct", settings.wasteTankTolerancePct);
-      setSimpleValue("fwTankTolerancePct", settings.fwTankTolerancePct);
-      setSimpleValue("sludgeMethod", settings.sludgeMethod);
-      setSimpleValue("sludgeConstructionBasis", settings.sludgeConstructionBasis);
-      refreshSludgeMethodOptions();
-      setSimpleValue("sludgeItem3Base", settings.sludgeItem3Base);
-      setSimpleValue("sludgeFuelMode", settings.sludgeFuelMode);
-      setSimpleValue("sludgeDays", settings.sludgeDays);
-      setSimpleValue("grtRange", settings.grtRange);
-      setSimpleValue(
-        "sludgeUseBallastAddition",
-        settings.sludgeUseBallastAddition
-      );
-      setSimpleValue("ballastCapacityTonnes", settings.ballastCapacityTonnes);
-      setSimpleValue("ballastFuelType", settings.ballastFuelType);
-      setSimpleValue("bilgeDrainDays", settings.bilgeDrainDays);
-
-      rowsContainer.innerHTML = "";
-      if (!machineryRows.length) {
-        addRow();
-      } else {
-        machineryRows.forEach((savedRow) => {
-          addRow();
-          const tr = rowsContainer.lastElementChild;
-          tr.querySelector(".equipType").value = savedRow.equipmentType || "Main Engine";
-          tr.querySelector(".fuelType").value = savedRow.fuelType || "";
-          tr.querySelector(".quantity").value = savedRow.quantity ?? 1;
-          tr.querySelector(".powerKw").value = savedRow.powerKw ?? "";
-          tr.querySelector(".loadPct").value = savedRow.loadPct ?? "";
-          tr.querySelector(".sfoc").value = savedRow.sfoc ?? "";
-          tr.querySelector(".density").value = savedRow.density ?? "";
-        });
-      }
-
-      setFileStatus("Inputs imported from XLSX successfully.");
-    } catch (error) {
-      setFileStatus(`Import failed: ${error.message}`, true);
-    }
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-function createLi(text) {
-  const li = document.createElement("li");
-  li.textContent = text;
-  return li;
-}
-
-function collectResultLines() {
-  const sections = [
-    { key: "total", title: "Total Consumption", element: totalResults },
-    { key: "fuel", title: "By Fuel Type", element: fuelResults },
-    { key: "tank", title: "Tank Capacity Recommendation", element: tankResults },
-    {
-      key: "utility",
-      title: "Waste Water and FW Tank Recommendation",
-      element: utilityTankResults,
-    },
-    {
-      key: "sludge",
-      title: "Sludge Tank Recommendation (MARPOL Annex I Reg. 12.1)",
-      element: sludgeResults,
-    },
-    {
-      key: "bilgeDrain",
-      title: "Bilge Water & Drain Oil Tank Recommendation (MEPC/Circular.235)",
-      element: bilgeDrainResults,
-    },
-  ];
-
-  return sections.map((section) => ({
-    key: section.key,
-    title: section.title,
-    lines: [...section.element.querySelectorAll("li")].map((li) => li.textContent),
-  }));
-}
-
-async function exportPdfReport() {
-  if (!window.jspdf || !window.jspdf.jsPDF) {
-    setFileStatus("PDF library is not loaded.", true);
-    return;
-  }
-
-  const hasResults = calculate();
-  if (!hasResults) {
-    setFileStatus("Fix validation errors before creating PDF.", true);
-    return;
-  }
-
-  const { jsPDF } = window.jspdf;
-  const pdf = new jsPDF({ unit: "pt", format: "a4" });
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 40;
-  const contentWidth = pageWidth - margin * 2;
-  let y = 46;
-
-  const loadImageDataUrl = (path) =>
-    new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL("image/png"));
-      };
-      img.onerror = () => reject(new Error(`Could not load logo: ${path}`));
-      img.src = path;
-    });
-
-  const drawLine = (text, size = 10) => {
-    const lines = pdf.splitTextToSize(text, contentWidth);
-    if (y + lines.length * (size + 3) > pageHeight - margin) {
-      pdf.addPage();
-      y = margin;
-    }
-    pdf.setFontSize(size);
-    pdf.text(lines, margin, y);
-    y += lines.length * (size + 3) + 4;
-  };
-
-  pdf.setFillColor(255, 255, 255);
-  pdf.rect(0, 0, pageWidth, 95, "F");
-  try {
-    const logoDataUrl = await loadImageDataUrl(REPORT_LOGO_PATH);
-    pdf.addImage(logoDataUrl, "PNG", margin, 14, 120, 48);
-  } catch (error) {
-    setFileStatus(`${error.message}. PDF will be created without logo.`, true);
-  }
-
-  pdf.setTextColor(11, 74, 140);
-  pdf.setFontSize(17);
-  pdf.text("Vessel Fuel Consumption Report", pageWidth - margin, 36, {
-    align: "right",
-  });
-  pdf.setFontSize(10);
-  pdf.text(`Generated: ${new Date().toLocaleString()}`, pageWidth - margin, 56, {
-    align: "right",
-  });
-  pdf.text("Arti Engineering", pageWidth - margin, 71, { align: "right" });
-  pdf.setDrawColor(59, 130, 197);
-  pdf.setLineWidth(1);
-  pdf.line(margin, 92, pageWidth - margin, 92);
-  pdf.setTextColor(0, 0, 0);
-  y = 118;
-
-  const inputSummary = [
-    `Voyage Duration: ${getSimpleValue("voyageDuration")} ${getSimpleValue("voyageUnit")}`,
-    `Storage Reserve: ${getSimpleValue("storageReservePct")}%`,
-    `Service Tank Autonomy: ${getSimpleValue("serviceHours")} h`,
-    `POB: ${getSimpleValue("personsOnBoard")}`,
-    `Ship Category: ${getSimpleValue("shipCategory")}`,
-    `Black Water System: ${getSimpleValue("blackWaterSystem")}`,
-    `No-Discharge Period: ${getSimpleValue("nonDischargeDays")} days`,
-    `FW Tolerance: ${getSimpleValue("fwTankTolerancePct")}%`,
-    `Grey/Black Tolerance: ${getSimpleValue("wasteTankTolerancePct")}%`,
-  ];
-
-  const sectionColorMap = {
-    inputs: [230, 240, 255],
-    total: [219, 234, 254],
-    fuel: [224, 242, 254],
-    tank: [224, 231, 255],
-    utility: [243, 232, 255],
-    sludge: [255, 237, 213],
-    bilgeDrain: [204, 251, 241],
-  };
-
-  const estimateSectionHeight = (title, lines) => {
-    const titleHeight = pdf.splitTextToSize(title, contentWidth).length * (12 + 3) + 4;
-    const lineHeight = lines.reduce((acc, line) => {
-      const wrapped = pdf.splitTextToSize(`- ${line}`, contentWidth - 18);
-      return acc + wrapped.length * (10 + 3) + 2;
-    }, 0);
-    return 16 + titleHeight + lineHeight + 8;
-  };
-
-  const drawSectionBox = (title, lines, rgb) => {
-    const neededHeight = estimateSectionHeight(title, lines);
-    if (y + neededHeight > pageHeight - margin) {
-      pdf.addPage();
-      y = margin;
-    }
-
-    pdf.setFillColor(...rgb);
-    pdf.setDrawColor(185, 200, 220);
-    pdf.roundedRect(margin, y - 8, contentWidth, neededHeight, 6, 6, "FD");
-
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(12);
-    pdf.text(title, margin + 10, y + 10);
-    y += 24;
-
-    pdf.setFontSize(10);
-    lines.forEach((line) => {
-      const wrapped = pdf.splitTextToSize(`- ${line}`, contentWidth - 18);
-      pdf.text(wrapped, margin + 10, y);
-      y += wrapped.length * 13 + 2;
-    });
-
-    y += 8;
-  };
-
-  drawSectionBox("Inputs", inputSummary, sectionColorMap.inputs);
-
-  const resultLines = collectResultLines();
-  resultLines.forEach((section) => {
-    drawSectionBox(
-      section.title,
-      section.lines,
-      sectionColorMap[section.key] || sectionColorMap.inputs
-    );
-  });
-
-  const now = new Date();
-  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(
-    now.getDate()
-  ).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(
-    now.getMinutes()
-  ).padStart(2, "0")}`;
-  const filename = `vessel_report_${stamp}.pdf`;
-
-  try {
-    const blob = pdf.output("blob");
-    const savedWithPicker = await saveBlobWithPicker(
-      blob,
-      filename,
-      {
-        description: "PDF Document",
-        accept: {
-          "application/pdf": [".pdf"],
-        },
-      },
-      filename
-    );
-    setFileStatus(
-      savedWithPicker
-        ? "PDF report saved."
-        : "PDF report downloaded (save picker not supported in this browser)."
-    );
-  } catch (error) {
-    if (error.name === "AbortError") {
-      setFileStatus("Save canceled.");
-      return;
-    }
-    setFileStatus(`PDF save failed: ${error.message}`, true);
-  }
-}
-
-function calculate() {
-  errorsBox.textContent = "";
-  clearResults();
-
-  const voyage = getVoyageHours();
-  const tankSettings = getTankSettings();
-  const utilityTankSettings = getUtilityTankSettings(voyage.value || 0);
-  const sludgeSettings = getSludgeSettings();
-  const { parsedRows, rowErrors } = parseRows();
-  const bilgeDrainSettings = getBilgeDrainSettings(parsedRows);
-  const allErrors = [
-    ...rowErrors,
-    ...tankSettings.settingErrors,
-    ...utilityTankSettings.utilityErrors,
-    ...sludgeSettings.sludgeErrors,
-    ...bilgeDrainSettings.bilgeDrainErrors,
-  ];
-
-  if (voyage.error) {
-    allErrors.push(voyage.error);
-  }
-
-  if (allErrors.length > 0) {
-    errorsBox.textContent = allErrors.join("\n");
-    return false;
-  }
-
-  let totalHourlyKg = 0;
-  let totalDailyM3 = 0;
-  const byFuel = {};
-
-  parsedRows.forEach((row) => {
-    const hourlyKg =
-      row.quantity * row.powerKw * (row.loadPct / 100) * (row.sfoc / 1000);
-    const hourlyM3 = hourlyKg / row.density;
-    totalHourlyKg += hourlyKg;
-
-    if (!byFuel[row.fuelType]) {
-      byFuel[row.fuelType] = { hourlyKg: 0, hourlyM3: 0 };
-    }
-
-    byFuel[row.fuelType].hourlyKg += hourlyKg;
-    byFuel[row.fuelType].hourlyM3 += hourlyM3;
-  });
-
-  const totalDailyKg = totalHourlyKg * 24;
-  const totalVoyageKg = totalHourlyKg * voyage.value;
-
-  totalResults.appendChild(
-    createLi(`Hourly Total: ${formatMass(totalHourlyKg)}/h (${formatTons(totalHourlyKg)} t/h)`)
-  );
-  totalResults.appendChild(
-    createLi(`Daily Total: ${formatMass(totalDailyKg)}/day (${formatTons(totalDailyKg)} t/day)`)
-  );
-  totalResults.appendChild(
-    createLi(`Voyage Total: ${formatMass(totalVoyageKg)} (${formatTons(totalVoyageKg)} t)`)
-  );
-
-  const tankNeedByFuel = {};
-
-  Object.entries(byFuel).forEach(([fuel, data]) => {
-    const hourly = data.hourlyKg;
-    const daily = hourly * 24;
-    const voyageTotal = hourly * voyage.value;
-    const hourlyM3 = data.hourlyM3;
-    const dailyM3 = hourlyM3 * 24;
-    totalDailyM3 += dailyM3;
-    const voyageM3 = hourlyM3 * voyage.value;
-
-    fuelResults.appendChild(
-      createLi(
-        `${fuel} -> ${formatMass(hourly)}/h (${formatM3(hourlyM3)}/h), ${formatMass(daily)}/day (${formatM3(dailyM3)}/day), ${formatMass(voyageTotal)}/voyage (${formatM3(voyageM3)}/voyage)`
-      )
-    );
-
-    const storageTankM3 =
-      voyageM3 * (1 + tankSettings.values.storageReservePct / 100);
-    const serviceTankM3 = hourlyM3 * tankSettings.values.serviceHours;
-    const totalTankNeedM3 = storageTankM3 + serviceTankM3;
-
-    tankNeedByFuel[fuel] = totalTankNeedM3;
-
-    tankResults.appendChild(
-      createLi(
-        `${fuel} -> Storage Tank: ${formatM3(storageTankM3)} (with ${tankSettings.values.storageReservePct.toFixed(1)}% reserve), Service Tank: ${formatM3(serviceTankM3)} (${tankSettings.values.serviceHours.toFixed(1)} h autonomy), Total Need: ${formatM3(totalTankNeedM3)}`
-      )
-    );
-  });
-
-  if (tankNeedByFuel.HFO) {
-    totalResults.appendChild(
-      createLi(`HFO Tank Need (Storage + Service): ${formatM3(tankNeedByFuel.HFO)}`)
-    );
-  }
-
-  if (tankNeedByFuel.MGO) {
-    totalResults.appendChild(
-      createLi(`MGO Tank Need (Storage + Service): ${formatM3(tankNeedByFuel.MGO)}`)
-    );
-  }
-
-  const {
-    personsOnBoard,
-    shipCategory,
-    blackWaterSystem,
-    greyExclRateLpd,
-    laundryRateLpd,
-    galleyRateLpd,
-    totalGreyRateLpd,
-    blackRateLpd,
-    greyWaterDailyM3,
-    blackWaterDailyM3,
-    nonDischargeDays,
-    wasteTankTolerancePct,
-    fwTankTolerancePct,
-    voyageDays,
-  } = utilityTankSettings.values;
-
-  const greyTankM3 =
-    greyWaterDailyM3 * nonDischargeDays * (1 + wasteTankTolerancePct / 100);
-  const blackTankM3 =
-    blackWaterDailyM3 * nonDischargeDays * (1 + wasteTankTolerancePct / 100);
-  const totalWasteDailyM3 = greyWaterDailyM3 + blackWaterDailyM3;
-  const fwTankM3 =
-    totalWasteDailyM3 * voyageDays * (1 + fwTankTolerancePct / 100);
-
-  utilityTankResults.appendChild(
-    createLi(
-      `Grey Water Tank Need: ${formatM3(greyTankM3)} (No-discharge: ${nonDischargeDays.toFixed(1)} days, Tolerance: ${wasteTankTolerancePct.toFixed(1)}%)`
-    )
-  );
-  utilityTankResults.appendChild(
-    createLi(
-      `Black Water Tank Need: ${formatM3(blackTankM3)} (No-discharge: ${nonDischargeDays.toFixed(1)} days, Tolerance: ${wasteTankTolerancePct.toFixed(1)}%)`
-    )
-  );
-  utilityTankResults.appendChild(
-    createLi(
-      `FW Tank Need: ${formatM3(fwTankM3)} (Voyage autonomy/endurance: ${voyageDays.toFixed(1)} days, Tolerance: ${fwTankTolerancePct.toFixed(1)}%)`
-    )
-  );
-  utilityTankResults.appendChild(
-    createLi(
-      `Total Grey + Black Generation: ${formatM3(totalWasteDailyM3)}/day`
-    )
-  );
-  utilityTankResults.appendChild(
-    createLi(
-      `BV rule-based inputs used: Category=${shipCategory}, POB=${personsOnBoard.toFixed(0)}, Grey(excl/laundry/galley)=${greyExclRateLpd.toFixed(1)}/${laundryRateLpd.toFixed(1)}/${galleyRateLpd.toFixed(1)} L/person/day -> Total Grey=${totalGreyRateLpd.toFixed(1)} L/person/day, Black=${blackRateLpd.toFixed(1)} L/person/day (${blackWaterSystem})`
-    )
-  );
-
-  const {
-    sludgeConstructionBasis,
-    sludgeMethod,
-    sludgeItem3Base,
-    sludgeFuelMode,
-    sludgeDays,
-    grtRange,
-    sludgeUseBallastAddition,
-    ballastCapacityTonnes,
-    ballastFuelType,
-  } = sludgeSettings.values;
-  const totalDailyTon = totalDailyKg / 1000;
-  let baseV1 = 0;
-  let k1 = null;
-  let methodDescription = "";
-
-  const grtMinV = grtRange === "gte4000" ? 2 : grtRange === "400to3999" ? 1 : 0;
-
-  if (sludgeMethod === "item1") {
-    k1 = sludgeFuelMode === "hfo_purified" ? 0.01 : 0.005;
-    baseV1 = k1 * totalDailyTon * sludgeDays;
-    methodDescription = "Item .1";
-  } else if (sludgeMethod === "item2") {
-    baseV1 = grtMinV;
-    methodDescription = "Item .2";
-  } else if (sludgeMethod === "item3") {
-    if (sludgeItem3Base === "item1") {
-      k1 = sludgeFuelMode === "hfo_purified" ? 0.01 : 0.005;
-      baseV1 = k1 * totalDailyTon * sludgeDays;
+function drawEngineTable(bodyId, rows, kind) {
+  const body = $(bodyId);
+  body.innerHTML = "";
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.dataset.id = row.id;
+    if (kind === "boiler") {
+      tr.innerHTML = `
+        <td><input type="text" value="${escapeAttr(row.label)}" data-k="label" /></td>
+        <td><input type="number" min="0" step="10" value="${escapeAttr(row.consumptionKgPerH)}" data-k="consumptionKgPerH" /></td>
+        <td><select data-k="fuel">${fuelOptions(row.fuel)}</select></td>
+        <td><button class="btn-ghost" type="button" data-del>Delete</button></td>
+      `;
     } else {
-      baseV1 = grtMinV;
+      tr.innerHTML = `
+        <td><input type="text" value="${escapeAttr(row.label)}" data-k="label" /></td>
+        <td><input type="number" min="0" step="${kind === "ae" ? 10 : 100}" value="${escapeAttr(row.powerKw)}" data-k="powerKw" /></td>
+        <td><input type="number" min="0" step="0.1" value="${escapeAttr(row.sfocGPerKwh)}" data-k="sfocGPerKwh" /></td>
+        <td><select data-k="fuel">${fuelOptions(row.fuel)}</select></td>
+        <td><button class="btn-ghost" type="button" data-del>Delete</button></td>
+      `;
     }
-    methodDescription = "Item .3 (base V1 from " + sludgeItem3Base.replace("item", ".") + ")";
-  } else if (sludgeMethod === "item4") {
-    k1 = sludgeFuelMode === "hfo_purified" ? 0.015 : 0.005;
-    baseV1 = k1 * totalDailyM3 * sludgeDays;
-    methodDescription = "Item .4";
-  } else if (sludgeMethod === "item5") {
-    k1 = sludgeFuelMode === "hfo_purified" ? 0.015 : 0.005;
-    const v4 = k1 * totalDailyM3 * sludgeDays;
-    const v51 = 0.5 * v4;
-    const v52 = grtMinV;
-    baseV1 = Math.max(v51, v52);
-    methodDescription = "Item .5";
-    sludgeResults.appendChild(
-      createLi(
-        `Item .5 detail: .5.1=${formatM3(v51)}, .5.2=${formatM3(v52)} -> Selected V1=${formatM3(baseV1)}`
-      )
-    );
-  }
-
-  let finalV = baseV1;
-  let ballastAddition = 0;
-  if (sludgeMethod === "item3" && sludgeUseBallastAddition) {
-    const k2 = ballastFuelType === "heavy" ? 0.01 : 0.005;
-    ballastAddition = k2 * ballastCapacityTonnes;
-    finalV += ballastAddition;
-    sludgeResults.appendChild(
-      createLi(
-        `Item .3 addition: K2=${k2.toFixed(3)}, B=${ballastCapacityTonnes.toFixed(
-          2
-        )} t -> K2 x B = ${formatM3(ballastAddition)}`
-      )
-    );
-  }
-
-  sludgeResults.appendChild(
-    createLi(
-      `${methodDescription} base V1: ${formatM3(baseV1)}`
-    )
-  );
-  const methodGroup = ["item4", "item5"].includes(sludgeMethod)
-    ? "post_1990_set"
-    : ["item1", "item2"].includes(sludgeMethod)
-      ? "pre_1990_set"
-      : "item3";
-  if (
-    (sludgeConstructionBasis === "post_1990" && methodGroup === "pre_1990_set") ||
-    (sludgeConstructionBasis === "pre_1990" && methodGroup === "post_1990_set")
-  ) {
-    sludgeResults.appendChild(
-      createLi(
-        "Regulatory note: selected construction basis and method family are mixed. Review if this is intentional."
-      )
-    );
-  } else {
-    sludgeResults.appendChild(
-      createLi("Regulatory note: selected construction basis and method family are aligned.")
-    );
-  }
-  if (k1 !== null) {
-    if (sludgeMethod === "item1") {
-      sludgeResults.appendChild(
-        createLi(
-          `Inputs used (.1): K1=${k1.toFixed(3)}, C=${totalDailyTon.toFixed(
-            3
-          )} t/day, D=${sludgeDays.toFixed(1)} days`
-        )
-      );
-    } else if (sludgeMethod === "item4" || sludgeMethod === "item5") {
-      sludgeResults.appendChild(
-        createLi(
-          `Inputs used (.4/.5): K1=${k1.toFixed(3)}, C=${totalDailyM3.toFixed(
-            3
-          )} m³/day, D=${sludgeDays.toFixed(1)} days`
-        )
-      );
-    } else if (sludgeMethod === "item3") {
-      sludgeResults.appendChild(
-        createLi(
-          `Inputs used (.3 base .1): K1=${k1.toFixed(3)}, C=${totalDailyTon.toFixed(
-            3
-          )} t/day, D=${sludgeDays.toFixed(1)} days`
-        )
-      );
-    }
-  } else {
-    if (sludgeMethod === "item2") {
-      sludgeResults.appendChild(
-        createLi(`Inputs used (.2): GRT range=${grtRange}`)
-      );
-    } else if (sludgeMethod === "item3" && sludgeItem3Base === "item2") {
-      sludgeResults.appendChild(
-        createLi(`Inputs used (.3 base .2): GRT range=${grtRange}`)
-      );
-    }
-  }
-  sludgeResults.appendChild(
-    createLi(`Required Sludge Tank Capacity: ${formatM3(finalV)}`)
-  );
-
-  const {
-    mainEngineKw,
-    holdDays,
-  } = bilgeDrainSettings.values;
-  let bilgeCapacityM3 = 0;
-  if (mainEngineKw <= 1000) {
-    bilgeCapacityM3 = 1.5;
-  } else if (mainEngineKw <= 20000) {
-    bilgeCapacityM3 = 1.5 + (mainEngineKw - 1000) / 1500;
-  } else {
-    bilgeCapacityM3 = 14.2 + (0.2 * (mainEngineKw - 20000)) / 1500;
-  }
-
-  let drainOilCapacityM3 = 0;
-  if (mainEngineKw <= 10000) {
-    drainOilCapacityM3 = (20 * holdDays * mainEngineKw) / 1_000_000;
-  } else {
-    drainOilCapacityM3 =
-      holdDays * (0.2 + (7 * (mainEngineKw - 10000)) / 1_000_000);
-  }
-
-  bilgeDrainResults.appendChild(
-    createLi(
-      `Bilge Water Holding Tank Capacity: ${formatM3(bilgeCapacityM3)} (P=${mainEngineKw.toFixed(
-        0
-      )} kW, MEPC/Circular.235 rating method)`
-    )
-  );
-  bilgeDrainResults.appendChild(
-    createLi(
-      `Drain & Leakage Oil Tank Capacity: ${formatM3(
-        drainOilCapacityM3
-      )} (P=${mainEngineKw.toFixed(0)} kW, D=${holdDays.toFixed(
-        1
-      )} days, MEPC/Circular.235 method)`
-    )
-  );
-  return true;
+    tr.querySelectorAll("input, select").forEach((el) => {
+      const handler = () => {
+        row[el.dataset.k] = el.value;
+        updateResults();
+      };
+      el.addEventListener("input", handler);
+      el.addEventListener("change", handler);
+    });
+    tr.querySelector("[data-del]").addEventListener("click", () => {
+      if (kind === "me") state.mainEngines = state.mainEngines.filter((b) => b.id !== row.id);
+      if (kind === "ae") state.auxiliaryEngines = state.auxiliaryEngines.filter((b) => b.id !== row.id);
+      if (kind === "boiler") state.boilers = state.boilers.filter((b) => b.id !== row.id);
+      drawAllTables();
+      updateResults();
+    });
+    body.appendChild(tr);
+  });
 }
 
-addRowBtn.addEventListener("click", addRow);
-calculateBtn.addEventListener("click", calculate);
-exportXlsxBtn.addEventListener("click", () => {
-  exportInputsToXlsx();
-});
-exportPdfBtn.addEventListener("click", () => {
-  exportPdfReport();
-});
-importXlsxInput.addEventListener("change", (event) => {
-  importInputsFromXlsx(event.target.files[0]);
-});
-sludgeConstructionBasisEl.addEventListener("change", refreshSludgeMethodOptions);
-sludgeMethodEl.addEventListener("change", toggleItem3BaseVisibility);
-sludgeMethodEl.addEventListener("change", toggleGRTVisibility);
-sludgeMethodEl.addEventListener("change", toggleBallastVisibility);
-sludgeMethodEl.addEventListener("change", refreshK1InputState);
-sludgeItem3BaseEl.addEventListener("change", toggleGRTVisibility);
-sludgeItem3BaseEl.addEventListener("change", refreshK1InputState);
+function drawAllTables() {
+  drawEngineTable("meBody", state.mainEngines, "me");
+  drawEngineTable("aeBody", state.auxiliaryEngines, "ae");
+  drawEngineTable("boilerBody", state.boilers, "boiler");
+}
 
-rowsContainer.addEventListener("click", (event) => {
-  if (!event.target.classList.contains("removeRowBtn")) {
-    return;
+function fmtM3(n, digits = 2) {
+  return n == null || Number.isNaN(n) ? "—" : `${fmt(n, digits)} m³`;
+}
+
+function tankFacts(tank, persons) {
+  if (!tank) return fact("Daily generation", "—");
+  const rows = [
+    fact("Daily generation", `${fmt(tank.dailyM3, 2)} m³/day`),
+    fact("Rate", escapeHtml(TankCapacities.wastewaterTankRateDescription(tank, persons))),
+  ];
+  if (tank.id === "gray") {
+    for (const c of tank.components) {
+      rows.push(fact(escapeHtml(c.label), `${fmt(c.rateLPerPersonDay, 0)} L/p/d`));
+    }
+  }
+  return rows.join("");
+}
+
+function updateResults() {
+  const input = collectInput();
+  const result = TankCapacities.calculate(input);
+  state.lastInput = input;
+  state.lastResult = result;
+
+  $("errorBox").classList.toggle("hidden", result.errors.length === 0);
+  $("errorBox").textContent = result.errors.join(" ");
+  $("warnBox").classList.toggle("hidden", result.warnings.length === 0);
+  $("warnBox").textContent = result.warnings.join(" ");
+  $("statusDot").className = `dot ${result.ok ? "ok" : "bad"}`;
+
+  $("outFuelTank").textContent = result.totalFuelVolumeM3
+    ? fmtM3(result.totalFuelVolumeM3, 1)
+    : "—";
+
+  const ww = result.wastewater;
+  const hold = result.sewageHolding;
+  $("blackDays").textContent = fmtPeriod(hold);
+  $("grayDays").textContent = fmtPeriod(hold);
+  $("outBlackHint").textContent = "Holding";
+  $("outGrayHint").textContent = "Holding";
+  $("outBlack").textContent = ww?.tanks[0] ? fmtM3(ww.tanks[0].holdingM3, 2) : "—";
+  $("outGray").textContent = ww?.tanks[1] ? fmtM3(ww.tanks[1].holdingM3, 2) : "—";
+  $("blackFacts").innerHTML = tankFacts(ww?.tanks[0], ww?.personsOnBoard);
+  $("grayFacts").innerHTML = tankFacts(ww?.tanks[1], ww?.personsOnBoard);
+
+  const sw = result.solidWaste;
+  if (!sw) {
+    $("solidNoteHead").textContent = "—";
+    $("solidReadouts").innerHTML = "";
+    $("solidFacts").innerHTML = fact("Solid waste", "—");
+  } else {
+    $("solidNoteHead").textContent = [
+      fmtPeriod(sw.period),
+      sw.withCompactor ? "compactor" : "",
+      sw.incinerator ? "incinerator ×0.6" : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    $("solidReadouts").innerHTML = sw.categories
+      .map(
+        (c) =>
+          `<article class="is-total sw-${escapeAttr(c.category)}"><small>${escapeHtml(c.label)}</small><strong>${fmtM3(c.voyageVolumeM3, 2)}</strong></article>`,
+      )
+      .join("");
+    $("solidFacts").innerHTML = sw.categories
+      .map((c) => fact(escapeHtml(c.label), `${fmt(c.dailyMassKg, 1)} kg/d`))
+      .join("");
   }
 
-  const row = event.target.closest("tr");
-  if (row) {
-    row.remove();
+  const oily = result.oilyWaste || {};
+  const sludge = oily.sludge;
+  const bilge = oily.oilyBilge;
+  $("oilyInputFacts").innerHTML = [
+    fact("Daily fuel C", oily.dailyFuelM3 != null ? `${fmt(oily.dailyFuelM3, 2)} m³/day` : "—"),
+    fact("Main-engine rating P", oily.mainEngineRatingKw != null ? `${fmt(oily.mainEngineRatingKw, 0)} kW` : "—"),
+  ].join("");
+  $("sludgeDot").className = `dot ${sludge ? "ok" : "bad"}`;
+  $("sludgeDays").textContent = oily.sludgePeriod ? fmtPeriod(oily.sludgePeriod) : "—";
+  $("outSludge").textContent = sludge ? fmtM3(sludge.volumeM3, 1) : "—";
+  $("sludgeFacts").innerHTML = [
+    fact("K₁", oily.k1 != null ? `${oily.k1.toFixed(3)} (${oily.k1Source}${oily.hfoPurified ? " · HFO purified" : " · no purification"})` : "—"),
+    fact("Discharge interval D", oily.sludgePeriod ? fmtPeriod(oily.sludgePeriod) : "—"),
+    ...(sludge
+      ? [
+          fact("K₁ × C × D", `${sludge.k1.toFixed(3)} × ${fmt(sludge.C, 2)} × ${fmt(sludge.D, Math.abs(sludge.D - Math.round(sludge.D)) < 1e-9 ? 0 : 1)}`),
+          fact("Rule", escapeHtml(sludge.rule)),
+          fact("Formula", escapeHtml(sludge.formula)),
+        ]
+      : [fact("Sludge tank", "—")]),
+  ].join("");
+  $("bilgeDot").className = `dot ${bilge ? "ok" : "bad"}`;
+  $("outBilge").textContent = bilge ? fmtM3(bilge.volumeM3, 1) : "—";
+  $("bilgeFacts").innerHTML = bilge
+    ? [
+        fact("Rule", escapeHtml(bilge.rule)),
+        fact("Band", escapeHtml(bilge.band)),
+        fact("Formula", escapeHtml(bilge.formula)),
+        fact("P", `${fmt(bilge.P, 0)} kW`),
+      ].join("")
+    : fact("Oily bilge holding", "—");
+  $("bilgeNote").textContent = oily.hfoRequiresHeatedBilge
+    ? "HFO density > 0.94 at 15 °C: Circ.642 §7.5 — holding tank required, with heating."
+    : "";
+
+  const periods = result.periods || {};
+  $("legFuel").textContent = periods.fuel ? fmtPeriod(periods.fuel) : "Range ÷ Vs";
+  $("fuelDays").textContent = periods.fuel ? fmtPeriod(periods.fuel) : "—";
+  $("legFw").textContent = periods.freshWater ? fmtPeriod(periods.freshWater) : "Autonomy / Range ÷ Vs";
+  $("legBlack").textContent = periods.wastewater ? fmtPeriod(periods.wastewater) : "NDP ≥ 7 d";
+  $("legGray").textContent = periods.wastewater ? fmtPeriod(periods.wastewater) : "NDP ≥ 7 d";
+  $("legSolid").textContent = periods.solidWaste ? fmtPeriod(periods.solidWaste) : "Autonomy / Range ÷ Vs";
+  $("legSludge").textContent = periods.sludge ? fmtPeriod(periods.sludge) : "Autonomy / Range ÷ Vs / 30 d";
+}
+
+function setType(type) {
+  state.shipType = Number(type);
+  document.querySelectorAll(".type-card").forEach((btn) => {
+    btn.classList.toggle("is-active", Number(btn.dataset.type) === state.shipType);
+  });
+  updateResults();
+}
+
+function fuelShortLabel(fuel) {
+  const short = {
+    diesel_gas_oil: "MGO/MDO",
+    light_fuel_oil: "LFO",
+    heavy_fuel_oil: "HFO",
+    lpg_propane: "LPG-P",
+    lpg_butane: "LPG-B",
+    lng: "LNG",
+    methanol: "MeOH",
+    ethanol: "EtOH",
+  };
+  return short[fuel] || TankCapacities.FUEL_LABELS[fuel] || fuel || "—";
+}
+
+function sludgeK1ModeLabel(mode) {
+  if (mode === "hfo_purified") return "HFO purified for ME (K₁ = 0.015)";
+  if (mode === "diesel_or_no_purification") return "MDO / no purification (K₁ = 0.005)";
+  return "Auto from main-engine fuel";
+}
+
+function reportFacts(rows) {
+  if (!rows.length) return "";
+  return `<dl class="facts">${rows
+    .map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`)
+    .join("")}</dl>`;
+}
+
+function reportCheck(on, text) {
+  return `<div class="check"><i class="${on ? "on" : ""}"></i>${escapeHtml(text)}</div>`;
+}
+
+function reportField(label, value, extra = "") {
+  return `<label class="${extra}">${label}<span class="val">${value}</span></label>`;
+}
+
+function reportEngineRows(rows, kind) {
+  if (!rows.length) return `<tr><td colspan="${kind === "boiler" ? 3 : 4}">—</td></tr>`;
+  if (kind === "boiler") {
+    return rows
+      .map(
+        (b) =>
+          `<tr><td>${escapeHtml(b.label)}</td><td>${fmt(b.consumptionKgPerH, 0)}</td><td>${escapeHtml(fuelShortLabel(b.fuel))}</td></tr>`,
+      )
+      .join("");
   }
+  return rows
+    .map(
+      (e) =>
+        `<tr><td>${escapeHtml(e.label)}</td><td>${fmt(e.powerKw, 0)}</td><td>${fmt(e.sfocGPerKwh, 1)}</td><td>${escapeHtml(fuelShortLabel(e.fuel))}</td></tr>`,
+    )
+    .join("");
+}
+
+async function logoDataUrl() {
+  const res = await fetch("assets/arti-logo.jpg");
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function buildReportHtml(logo, input, result) {
+  const when = new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+  const ship = result.ship || input?.ship || {};
+  const ww = result.wastewater || { tanks: [] };
+  const sw = result.solidWaste;
+  const periods = result.periods || {};
+  const oily = result.oilyWaste || {};
+  const sludge = oily.sludge;
+  const bilge = oily.oilyBilge;
+  const hold = result.sewageHolding;
+  const black = ww.tanks?.[0];
+  const gray = ww.tanks?.[1];
+  const dDigits = sludge && Math.abs(sludge.D - Math.round(sludge.D)) < 1e-9 ? 0 : 1;
+
+  const types = TankCapacities.WASTEWATER_SHIP_TYPES.map((t) => {
+    const active = Number(ship.shipType) === t.value;
+    return `<button class="type-card${active ? " is-active" : ""}" type="button">
+      <span class="kicker">${escapeHtml(t.kicker)}</span>
+      <strong>${escapeHtml(t.label)}</strong>
+      <small>${escapeHtml(t.hint)}</small>
+    </button>`;
+  }).join("");
+
+  const legend = [
+    ["tank-fuel", "Fuel", periods.fuel ? fmtPeriod(periods.fuel) : "Range ÷ Vs"],
+    ["tank-fw", "Fresh water", periods.freshWater ? fmtPeriod(periods.freshWater) : "Autonomy / Range ÷ Vs"],
+    ["tank-black", "Black water", periods.wastewater ? fmtPeriod(periods.wastewater) : "NDP ≥ 7 d"],
+    ["tank-gray", "Grey water", periods.wastewater ? fmtPeriod(periods.wastewater) : "NDP ≥ 7 d"],
+    ["tank-sludge", "Sludge", periods.sludge ? fmtPeriod(periods.sludge) : "Autonomy / Range ÷ Vs / 30 d"],
+    ["tank-bilge", "Oily bilge", "Circ.642 rule"],
+    ["tank-solid", "Solid waste", periods.solidWaste ? fmtPeriod(periods.solidWaste) : "Autonomy / Range ÷ Vs"],
+  ]
+    .map(
+      ([cls, name, days]) =>
+        `<li class="${cls}"><span>${escapeHtml(name)}</span><em>${escapeHtml(days)}</em></li>`,
+    )
+    .join("");
+
+  const banners = [
+    result.errors?.length ? `<div class="banner err">${escapeHtml(result.errors.join(" "))}</div>` : "",
+    result.warnings?.length ? `<div class="banner warn">${escapeHtml(result.warnings.join(" "))}</div>` : "",
+  ].join("");
+
+  const swHead = sw
+    ? [fmtPeriod(sw.period), sw.withCompactor ? "compactor" : "", sw.incinerator ? "incinerator ×0.6" : ""]
+        .filter(Boolean)
+        .join(" · ")
+    : "—";
+  const swTiles = (sw?.categories || [])
+    .map(
+      (c) =>
+        `<article class="vol sw-${escapeAttr(c.category)}"><small>${escapeHtml(c.label)}</small><strong>${fmtM3(c.voyageVolumeM3, 2)}</strong></article>`,
+    )
+    .join("");
+  const swFacts = reportFacts((sw?.categories || []).map((c) => [escapeHtml(c.label), `${fmt(c.dailyMassKg, 1)} kg/d`]));
+
+  const blackFacts = reportFacts(
+    black
+      ? [
+          ["Daily generation", `${fmt(black.dailyM3, 2)} m³/day`],
+          ["Rate", escapeHtml(TankCapacities.wastewaterTankRateDescription(black, ww.personsOnBoard))],
+        ]
+      : [["Daily generation", "—"]],
+  );
+  const grayFacts = reportFacts(
+    gray
+      ? [
+          ["Daily generation", `${fmt(gray.dailyM3, 2)} m³/day`],
+          ["Rate", escapeHtml(TankCapacities.wastewaterTankRateDescription(gray, ww.personsOnBoard))],
+          ...gray.components.map((c) => [escapeHtml(c.label), `${fmt(c.rateLPerPersonDay, 0)} L/p/d`]),
+        ]
+      : [["Daily generation", "—"]],
+  );
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ARTI · Tank Capacities Report</title>
+  <style>
+    @page { size: A4; margin: 8mm; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: #1c2b3a;
+      background: #eef3f8;
+      font-size: 10.5px;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .brand { display: flex; gap: 10px; align-items: center; }
+    header img { height: 42px; width: auto; }
+    .eyebrow { margin: 0; letter-spacing: .16em; text-transform: uppercase; font-size: 8px; color: #1e6bb8; }
+    h1 { margin: 2px 0 0; font-size: 18px; font-weight: 650; letter-spacing: -.03em; color: #163a7a; }
+    .meta { text-align: right; }
+    .chips { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+    .chip { border: 1px solid #c5d4e4; background: #fff; color: #5b6e82; border-radius: 999px; padding: 3px 8px; font-size: 9px; }
+    .when { margin-top: 4px; font-size: 9px; color: #5b6e82; }
+    .banner { border-radius: 8px; padding: 6px 8px; margin-bottom: 8px; font-size: 10px; }
+    .banner.err { background: #fdecec; color: #c23b3b; border: 1px solid #f3c4c4; }
+    .banner.warn { background: rgba(194,94,18,.08); color: #a84e0c; border: 1px solid rgba(194,94,18,.3); }
+    .types { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 8px; }
+    .type-card {
+      text-align: left; border: 1px solid #c5d4e4; background: linear-gradient(180deg,#fff,#f4f8fc);
+      border-radius: 12px; padding: 8px 10px; color: #1c2b3a;
+    }
+    .type-card .kicker { display: block; color: #1e6bb8; font-size: 8px; letter-spacing: .18em; margin-bottom: 3px; }
+    .type-card strong { display: block; font-size: 12px; }
+    .type-card small { display: block; color: #5b6e82; margin-top: 2px; font-size: 9px; }
+    .type-card.is-active { border-color: #1e6bb8; background: linear-gradient(180deg,#eaf3fb,#fff); box-shadow: inset 0 0 0 1px rgba(30,107,184,.28); }
+    .legend { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; list-style: none; margin: 0 0 10px; padding: 0; }
+    .legend li { background: #fff; border: 1px solid #c5d4e4; border-radius: 10px; padding: 6px 8px 6px 10px; }
+    .legend span { display: flex; align-items: center; font-size: 10px; font-weight: 650; color: #163a7a; }
+    .legend span::before { content: ""; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; flex: none; }
+    .legend .tank-fuel span::before { background: #c8960c; }
+    .legend .tank-fw span::before { background: #0f8a8a; }
+    .legend .tank-black span::before { background: #4a3728; }
+    .legend .tank-gray span::before { background: #6d7f91; }
+    .legend .tank-solid span::before { background: #2f7d4a; }
+    .legend .tank-sludge span::before { background: #c25e12; }
+    .legend .tank-bilge span::before { background: #6b4c9a; }
+    .legend em { display: block; font-style: normal; font-size: 9px; color: #5b6e82; margin-top: 1px; }
+    .legend .tank-fuel { color: #c8960c; box-shadow: inset 4px 0 0 #c8960c; }
+    .legend .tank-fw { color: #0f8a8a; box-shadow: inset 4px 0 0 #0f8a8a; }
+    .legend .tank-black { color: #4a3728; box-shadow: inset 4px 0 0 #4a3728; }
+    .legend .tank-gray { color: #6d7f91; box-shadow: inset 4px 0 0 #6d7f91; }
+    .legend .tank-solid { color: #2f7d4a; box-shadow: inset 4px 0 0 #2f7d4a; }
+    .legend .tank-sludge { color: #c25e12; box-shadow: inset 4px 0 0 #c25e12; }
+    .legend .tank-bilge { color: #6b4c9a; box-shadow: inset 4px 0 0 #6b4c9a; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; align-items: stretch; }
+    .row-top { grid-template-columns: .92fr 1.08fr; }
+    .span-2 { grid-column: 1 / -1; }
+    .card {
+      background: #fff; border: 1px solid #c5d4e4; border-radius: 14px; padding: 9px 10px;
+      break-inside: avoid; page-break-inside: avoid;
+    }
+    .card.tank-fuel { border-color: #c8960c; box-shadow: inset 5px 0 0 #c8960c; }
+    .card.tank-sludge { border-color: #c25e12; box-shadow: inset 5px 0 0 #c25e12; }
+    .card.tank-bilge { border-color: #6b4c9a; box-shadow: inset 5px 0 0 #6b4c9a; }
+    .card.tank-black { border-color: #4a3728; box-shadow: inset 5px 0 0 #4a3728; }
+    .card.tank-gray { border-color: #6d7f91; box-shadow: inset 5px 0 0 #6d7f91; }
+    .card.tank-solid { border-color: #2f7d4a; box-shadow: inset 5px 0 0 #2f7d4a; }
+    .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .head h2 { margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #163a7a; }
+    .head p { margin: 0; color: #5b6e82; font-size: 9px; text-align: right; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+    label { display: flex; flex-direction: column; gap: 3px; font-size: 9px; color: #5b6e82; position: relative; }
+    .val {
+      display: block; background: #fff; border: 1px solid #b7c9db; border-radius: 8px;
+      padding: 5px 7px; font-size: 12px; color: #1c2b3a; font-variant-numeric: tabular-nums;
+    }
+    .ink-fuel .val { box-shadow: inset 3px 0 0 #c8960c; }
+    .ink-fw .val { box-shadow: inset 3px 0 0 #0f8a8a; }
+    .ink-ww .val { box-shadow: inset 3px 0 0 #4a3728; }
+    .ink-sludge .val { box-shadow: inset 3px 0 0 #c25e12; }
+    .keys { position: absolute; right: 0; top: 0; display: flex; gap: 3px; }
+    .keys i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+    .keys i.fw { background: #0f8a8a; }
+    .keys i.sludge { background: #c25e12; }
+    .keys i.solid { background: #2f7d4a; }
+    .keys i.black { background: #4a3728; }
+    .keys i.gray { background: #6d7f91; }
+    .extras { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #c5d4e4; display: grid; gap: 5px; }
+    .check { display: flex; align-items: center; gap: 6px; color: #1c2b3a; font-size: 10px; }
+    .check i { width: 10px; height: 10px; border: 1px solid #b7c9db; border-radius: 2px; flex: none; background: #fff; }
+    .check i.on { background: #163a7a; border-color: #163a7a; box-shadow: inset 0 0 0 2px #fff; }
+    .mach { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mach-boilers { grid-column: 1 / -1; }
+    .mini { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: #1e6bb8; font-weight: 650; margin: 0 0 4px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; color: #5b6e82; padding: 3px 4px; border-bottom: 1px solid #c5d4e4; }
+    td { padding: 4px; border-bottom: 1px solid #d7e2ee; font-size: 10px; }
+    .vol { background: #f7fafc; border: 1px solid #d3e0ec; border-radius: 10px; padding: 8px; }
+    .vol small { color: #5b6e82; letter-spacing: .08em; text-transform: uppercase; font-size: 8px; }
+    .vol strong { display: block; margin-top: 2px; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+    .vol em { color: #5b6e82; font-style: normal; font-size: 9px; }
+    .tank-fuel .vol { border-color: #c8960c; }
+    .tank-fuel .vol strong { color: #c8960c; }
+    .tank-sludge .vol { border-color: #c25e12; }
+    .tank-sludge .vol strong { color: #c25e12; }
+    .tank-bilge .vol { border-color: #6b4c9a; }
+    .tank-bilge .vol strong { color: #6b4c9a; }
+    .tank-black .vol { border-color: #4a3728; }
+    .tank-black .vol strong { color: #4a3728; }
+    .tank-gray .vol { border-color: #6d7f91; }
+    .tank-gray .vol strong { color: #6d7f91; }
+    .sw-plastics { border-color: #2a6f97; }
+    .sw-plastics strong { color: #2a6f97; }
+    .sw-paper { border-color: #b8860b; }
+    .sw-paper strong { color: #b8860b; }
+    .sw-glass_tins { border-color: #5a7d5a; }
+    .sw-glass_tins strong { color: #5a7d5a; }
+    .sw-food { border-color: #c45c26; }
+    .sw-food strong { color: #c45c26; }
+    .facts { margin: 8px 0 0; display: grid; gap: 4px; }
+    .facts div { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; border-bottom: 1px dotted rgba(91,110,130,.35); padding-bottom: 3px; }
+    .facts dt { color: #5b6e82; }
+    .facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+    .note { margin: 8px 0 0; font-size: 9px; color: #c25e12; }
+    .row-label { margin: 10px 0 6px; letter-spacing: .14em; text-transform: uppercase; font-size: 9px; color: #1e6bb8; }
+    .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    footer { margin-top: 8px; border-top: 1px solid #c5d4e4; padding-top: 6px; font-size: 8px; color: #5b6e82; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <img src="${logo}" alt="ARTI Engineering" />
+      <div>
+        <p class="eyebrow">ARTI Engineering · Tank capacities</p>
+        <h1>Dirty Oil, Wastewater &amp; Garbage</h1>
+      </div>
+    </div>
+    <div class="meta">
+      <div class="chips">
+        <span class="chip">MARPOL I/12 sludge</span>
+        <span class="chip">Circ.642 oily bilge</span>
+        <span class="chip">BV Pt F Ch 9 Tab 1</span>
+      </div>
+      <div class="when">${escapeHtml(when)} · ${escapeHtml(result.shipName)} · ${escapeHtml(shipTypeLabel(ship.shipType))}</div>
+    </div>
+  </header>
+  ${banners}
+  <section class="types">${types}</section>
+  <ul class="legend">${legend}</ul>
+
+  <section class="row row-top">
+    <article class="card">
+      <div class="head"><h2>Ship particulars</h2><p>Duration inputs</p></div>
+      ${reportField("Ship / project name", escapeHtml(result.shipName || "—"))}
+      <div class="grid-2">
+        ${reportField("<span>Vs (kn)</span>", fmt(ship.vsKn), "ink-fuel")}
+        ${reportField("<span>Range (nm)</span>", fmt(ship.rangeNm, 0), "ink-fuel")}
+        ${reportField('<span>Autonomy (days)</span><span class="keys"><i class="fw"></i><i class="sludge"></i><i class="solid"></i></span>', fmt(ship.enduranceDays), "ink-fw")}
+        ${reportField('<span>No-discharge period (days)</span><span class="keys"><i class="black"></i><i class="gray"></i></span>', fmt(ship.nonDischargePeriodDays), "ink-ww")}
+        ${reportField("<span>Persons on board</span>", fmt(ship.personsOnBoard, 0))}
+        ${reportField('<span>K₁ — HFO purification</span><span class="keys"><i class="sludge"></i></span>', escapeHtml(sludgeK1ModeLabel(ship.sludgeK1Mode)), "ink-sludge")}
+      </div>
+      <div class="extras">
+        ${reportCheck(ship.vacuumToilet, "Vacuum toilet (12 L/person/day · BV Tab 1)")}
+        ${reportCheck(ship.withCompactor, "Waste compactor")}
+        ${reportCheck(ship.solidWasteIncinerator, "Solid-waste incinerator (volume ×0.6, not glass/tins)")}
+      </div>
+    </article>
+    <article class="card">
+      <div class="head"><h2>Machinery</h2><p>kg/h = P × SFOC / 1000</p></div>
+      <div class="mach">
+        <div>
+          <p class="mini">Main engines</p>
+          <table>
+            <thead><tr><th>Label</th><th>kW</th><th>SFOC</th><th>Fuel</th></tr></thead>
+            <tbody>${reportEngineRows(result.mainEngines || [], "me")}</tbody>
+          </table>
+        </div>
+        <div>
+          <p class="mini">Auxiliary engines</p>
+          <table>
+            <thead><tr><th>Label</th><th>kW</th><th>SFOC</th><th>Fuel</th></tr></thead>
+            <tbody>${reportEngineRows(result.auxiliaryEngines || [], "ae")}</tbody>
+          </table>
+        </div>
+        <div class="mach-boilers">
+          <p class="mini">Boilers</p>
+          <table>
+            <thead><tr><th>Label</th><th>kg/h</th><th>Fuel</th></tr></thead>
+            <tbody>${reportEngineRows(result.boilers || [], "boiler")}</tbody>
+          </table>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <p class="row-label">Fuel tank · sludge · oily bilge</p>
+  <section class="row">
+    <article class="card tank-fuel">
+      <div class="head"><h2>Fuel tank</h2><p>${escapeHtml(periods.fuel ? fmtPeriod(periods.fuel) : "—")}</p></div>
+      <div class="vol"><small>Capacity</small><strong>${result.totalFuelVolumeM3 ? fmtM3(result.totalFuelVolumeM3, 1) : "—"}</strong></div>
+      ${reportFacts([
+        ["Daily fuel C", oily.dailyFuelM3 != null ? `${fmt(oily.dailyFuelM3, 2)} m³/day` : "—"],
+        ["Main-engine rating P", oily.mainEngineRatingKw != null ? `${fmt(oily.mainEngineRatingKw, 0)} kW` : "—"],
+      ])}
+      <p class="note">C is daily fuel volume from all consumers at service load. P is the sum of main-engine ratings.</p>
+    </article>
+    <article class="card tank-sludge">
+      <div class="head"><h2>Sludge tank</h2><p>${escapeHtml(oily.sludgePeriod ? fmtPeriod(oily.sludgePeriod) : "—")}</p></div>
+      <div class="vol"><small>V₁ sludge</small><strong>${sludge ? fmtM3(sludge.volumeM3, 1) : "—"}</strong><em>K₁ · C · D</em></div>
+      ${reportFacts([
+        ["K₁", oily.k1 != null ? `${oily.k1.toFixed(3)} (${oily.k1Source}${oily.hfoPurified ? " · HFO purified" : " · no purification"})` : "—"],
+        ["Discharge interval D", oily.sludgePeriod ? fmtPeriod(oily.sludgePeriod) : "—"],
+        ...(sludge
+          ? [
+              ["K₁ × C × D", `${sludge.k1.toFixed(3)} × ${fmt(sludge.C, 2)} × ${fmt(sludge.D, dDigits)}`],
+              ["Rule", escapeHtml(sludge.rule)],
+              ["Formula", escapeHtml(sludge.formula)],
+            ]
+          : [["Sludge tank", "—"]]),
+      ])}
+    </article>
+    <article class="card tank-bilge">
+      <div class="head"><h2>Oily bilge holding</h2><p>Circ.642 §8.3</p></div>
+      <div class="vol"><small>V bilge</small><strong>${bilge ? fmtM3(bilge.volumeM3, 1) : "—"}</strong><em>from P</em></div>
+      ${
+        bilge
+          ? reportFacts([
+              ["Rule", escapeHtml(bilge.rule)],
+              ["Band", escapeHtml(bilge.band)],
+              ["Formula", escapeHtml(bilge.formula)],
+              ["P", `${fmt(bilge.P, 0)} kW`],
+            ])
+          : reportFacts([["Oily bilge holding", "—"]])
+      }
+      ${oily.hfoRequiresHeatedBilge ? `<p class="note">HFO density &gt; 0.94 at 15 °C: Circ.642 §7.5 — holding tank required, with heating.</p>` : ""}
+    </article>
+    <article class="card tank-solid">
+      <div class="head"><h2>Solid waste</h2><p>${escapeHtml(swHead)}</p></div>
+      <div class="tiles">${swTiles || `<article class="vol"><small>Solid waste</small><strong>—</strong></article>`}</div>
+      ${swFacts}
+    </article>
+  </section>
+
+  <p class="row-label">Wastewater · BV Pt F Ch 9 Sec 2</p>
+  <section class="row">
+    <article class="card tank-black">
+      <div class="head"><h2>Black-water tank</h2><p>${escapeHtml(fmtPeriod(hold))}</p></div>
+      <div class="vol"><small>Holding</small><strong>${black ? fmtM3(black.holdingM3, 2) : "—"}</strong></div>
+      ${blackFacts}
+    </article>
+    <article class="card tank-gray">
+      <div class="head"><h2>Gray-water tank</h2><p>${escapeHtml(fmtPeriod(hold))}</p></div>
+      <div class="vol"><small>Holding</small><strong>${gray ? fmtM3(gray.holdingM3, 2) : "—"}</strong></div>
+      ${grayFacts}
+    </article>
+  </section>
+
+  <footer>
+    <span>ARTI Engineering · confidential calculation sheet</span>
+    <span>${escapeHtml(result.shipName)} · ${escapeHtml(when)}</span>
+  </footer>
+</body>
+</html>`;
+}
+
+function printReportHtml(html) {
+  const printWin = window.open("", "_blank", "noopener,noreferrer");
+  if (!printWin) {
+    throw new Error("Pop-up blocked. Allow pop-ups to save the PDF report.");
+  }
+  printWin.document.open();
+  printWin.document.write(html);
+  printWin.document.close();
+  const triggerPrint = () => {
+    printWin.focus();
+    printWin.print();
+  };
+  if (printWin.document.readyState === "complete") {
+    setTimeout(triggerPrint, 250);
+  } else {
+    printWin.onload = () => setTimeout(triggerPrint, 250);
+  }
+}
+
+async function exportPdf() {
+  const input = collectInput();
+  const result = TankCapacities.calculate(input);
+  state.lastInput = input;
+  state.lastResult = result;
+  const btn = $("btnPdf");
+  btn.disabled = true;
+  try {
+    const logo = await logoDataUrl();
+    const html = buildReportHtml(logo, input, result);
+    if (window.artiApp?.savePdf) {
+      await window.artiApp.savePdf(html);
+    } else {
+      printReportHtml(html);
+    }
+  } catch (err) {
+    $("errorBox").classList.remove("hidden");
+    $("errorBox").textContent = `PDF export failed: ${err.message || err}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.querySelectorAll(".type-card").forEach((btn) => {
+  btn.addEventListener("click", () => setType(btn.dataset.type));
 });
 
-addRow();
-refreshSludgeMethodOptions();
-toggleGRTVisibility();
-toggleBallastVisibility();
-refreshK1InputState();
+$("addMe").addEventListener("click", () => {
+  const n = state.mainEngines.length + 1;
+  state.mainEngines.push({
+    id: crypto.randomUUID(),
+    label: `Main engine ${n}`,
+    powerKw: 6000,
+    sfocGPerKwh: 185,
+    fuel: "heavy_fuel_oil",
+  });
+  drawAllTables();
+  updateResults();
+});
+$("addAe").addEventListener("click", () => {
+  const n = state.auxiliaryEngines.length + 1;
+  state.auxiliaryEngines.push({
+    id: crypto.randomUUID(),
+    label: `Auxiliary engine ${n}`,
+    powerKw: 800,
+    sfocGPerKwh: 210,
+    fuel: "diesel_gas_oil",
+  });
+  drawAllTables();
+  updateResults();
+});
+$("addBoiler").addEventListener("click", () => {
+  const n = state.boilers.length + 1;
+  state.boilers.push({
+    id: crypto.randomUUID(),
+    label: `Boiler ${n}`,
+    consumptionKgPerH: 350,
+    fuel: "heavy_fuel_oil",
+  });
+  drawAllTables();
+  updateResults();
+});
+
+[
+  "shipName",
+  "vsKn",
+  "rangeNm",
+  "enduranceDays",
+  "nonDischargeDays",
+  "personsOnBoard",
+  "vacuumToilet",
+  "withCompactor",
+  "solidWasteIncinerator",
+  "sludgeK1Mode",
+].forEach((id) => {
+  $(id).addEventListener("input", updateResults);
+  $(id).addEventListener("change", updateResults);
+});
+
+$("btnPdf").addEventListener("click", exportPdf);
+
+drawAllTables();
+updateResults();
